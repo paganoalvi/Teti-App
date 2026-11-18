@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teti App</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <button type="button" id="helpBtn" class="ibtn l" aria-label="Ayuda">?</button>
+  <button type="button" id="infoBtn" class="ibtn r" aria-label="Acerca de la app">i</button>
+  <h1>Teti App</h1>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="entry" role="tab">Cargar toma</button>
+    <button class="tab" data-tab="stats" role="tab">Resumen</button>
+  </nav>
+</header>
+<p id="offline" class="offline" hidden>Sin conexión con el servidor: las tomas no se están guardando.</p>
+
+<main>
+<section id="hero" class="hero" aria-live="polite">
+  <span class="hero-label">Última toma</span>
+  <b id="heroTime" class="hero-time">—</b>
+  <span id="heroNext" class="hero-next"></span>
+  <span id="heroSub" class="hero-sub"></span>
+</section>
+<!-- CARGA -->
+<section id="entry" class="panel active">
+  <div class="choice" role="radiogroup" aria-label="Tipo de toma">
+    <input type="radio" name="type" id="t-teti" value="teti" checked>
+    <label for="t-teti">Toma de teti</label>
+    <input type="radio" name="type" id="t-formula" value="formula">
+    <label for="t-formula">Toma de leche de fórmula</label>
+  </div>
+  <p id="msg" class="msg" role="status"></p>
+
+  <div id="stopwatch" class="card sw">
+    <div id="swTime" class="sw-time" role="timer">00:00</div>
+    <button type="button" id="swMain" class="sw-main">Iniciar</button>
+    <div class="sw-row">
+      <button type="button" id="swLap" class="btn">Cambiar de teta</button>
+      <button type="button" id="swSave" class="btn blue">Guardar</button>
+      <button type="button" id="swReset" class="btn">Reiniciar</button>
+    </div>
+    <ol id="swLaps" class="sw-laps"></ol>
+  </div>
+  <form id="form" class="card" autocomplete="off" hidden>
+    <h2 id="formTitle">Nueva toma</h2>
+    <div id="when" class="row">
+      <label>Fecha <input type="date" id="date"></label>
+      <label>Hora de inicio <input type="time" id="start"></label>
+    </div>
+    <div id="fTeti">
+      <div class="row">
+        <label>Vuelta 1 (min) <input type="number" id="m1" min="1" max="180" inputmode="numeric"></label>
+        <label>Vuelta 2 (min) <input type="number" id="m2" min="0" max="180" inputmode="numeric" placeholder="opcional"></label>
+      </div>
+    </div>
+    <div id="fFormula" hidden>
+      <label>Mililitros <input type="number" id="ml" min="1" max="500" inputmode="numeric" placeholder="ml"></label>
+    </div>
+    <div class="actions">
+      <button type="submit" class="btn primary" id="saveBtn">Guardar toma</button>
+      <button type="button" class="btn" id="cancelBtn" hidden>Cancelar edición</button>
+    </div>
+  </form>
+  <button type="button" id="manualBtn" class="btn small manual">Cargar a mano</button>
+</section>
+
+<!-- RESUMEN -->
+<section id="stats" class="panel">
+  <div class="card">
+    <div class="head">
+      <h2>Últimas 4 tomas</h2>
+      <button class="btn small" id="fullBtn">Ver historial completo</button>
+    </div>
+    <div class="daynav dayrow">
+      <button class="btn small" id="prevDay" aria-label="Día anterior">‹</button>
+      <input type="date" id="statDate" aria-label="Día a mostrar">
+      <button class="btn small" id="nextDay" aria-label="Día siguiente">›</button>
+      <button class="btn small" id="todayBtn">Hoy</button>
+    </div>
+    <ul id="recent" class="list"></ul>
+  </div>
+
+  <div class="card">
+    <div class="head"><h2 id="metricsTitle">Métricas de hoy</h2></div>
+    <div id="metrics" class="metrics"></div>
+    <p class="hint">Una toma de teti cuenta todas sus vueltas juntas (teta 1 + teta 2).</p>
+  </div>
+
+  <div class="card">
+    <h2 id="chartsTitle">Últimos 7 días</h2>
+    <h3>Tomas por día</h3><div id="chTomas" class="chart"></div>
+    <h3>Minutos de teti</h3><div id="chMin" class="chart"></div>
+    <h3>Mililitros de fórmula</h3><div id="chMl" class="chart"></div>
+  </div>
+
+  <div class="card">
+    <h2>Copia de seguridad</h2>
+    <p class="hint">Los datos se guardan en el servidor. Descargá una copia de vez en cuando.</p>
+    <div class="actions">
+      <button class="btn" id="exportBtn">Descargar copia</button>
+      <label class="btn" for="importFile">Importar copia</label>
+      <input type="file" id="importFile" accept=".json" hidden>
+    </div>
+  </div>
+</section>
+</main>
+
+<dialog id="fullDlg">
+  <div class="head"><h2>Historial completo</h2><button class="btn small" id="closeDlg">Cerrar</button></div>
+  <div id="fullList"></div>
+</dialog>
+
+<dialog id="helpDlg" class="dlg">
+  <div class="head"><h2>Ayuda</h2><button type="button" class="btn small" data-close>Cerrar</button></div>
+  <p>Usá el cronómetro para teti o cargá los ml de fórmula. “Última toma” cuenta desde que empezó la toma, y la próxima se estima 3 horas después.</p>
+</dialog>
+
+<dialog id="infoDlg" class="dlg">
+  <div class="head"><h2>Acerca de Teti App</h2><button type="button" class="btn small" data-close>Cerrar</button></div>
+  <p>Teti App es una aplicación de código abierto, disponible en GitHub y de libre distribución. Nació para hacer un aporte a la sociedad: podés descargar el código, personalizarlo y adaptarlo a tus necesidades.</p>
+  <p>No tiene fines de lucro. Si querés colaborar con una donación, el alias del equipo de desarrollo es:</p>
+  <p class="alias"><code>alva.pagano</code></p>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
