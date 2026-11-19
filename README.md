@@ -24,7 +24,8 @@ Es de **código abierto**, de libre distribución y personalización. Se creó c
 - Gráficos de los últimos 7 días: tomas, minutos de teti y ml de fórmula.
 
 **Otros**
-- Los datos viven en el servidor: todos los dispositivos ven lo mismo y se actualizan solos cada 10 segundos.
+- **Un código por bebé:** cada bebé tiene un código secreto. Quien lo ingresa en su celular ve las mismas tomas (por ejemplo, ambos padres); otras familias crean su propio bebé y nunca ven datos ajenos. El código se ve y se copia desde el engranaje de configuración, para pasárselo a quien deba ver las mismas tomas.
+- Los datos viven en el servidor: los dispositivos de un mismo bebé se actualizan solos cada 10 segundos.
 - Copia de seguridad: descargar e importar un archivo JSON desde la app.
 - Ayuda e información del proyecto en ventanas emergentes.
 - Diseño en tonos crema, rosa y celeste, optimizado para celular.
@@ -44,7 +45,10 @@ Siempre desde el **inicio** de la última toma (en teti, el primer toque en *Ini
 ```
 teti-app/
 ├── main.py              # API REST + servidor de archivos estáticos
+├── db.py                # Base SQLite, migraciones y consultas aisladas por bebé
 ├── requirements.txt     # Dependencias de Python
+├── requirements-dev.txt # Dependencias para correr las pruebas
+├── tests/               # Pruebas de aislamiento de datos entre bebés
 ├── teti-app.service     # Unidad de systemd de ejemplo
 ├── static/
 │   ├── index.html
@@ -81,6 +85,19 @@ sudo systemctl enable --now teti-app
 
 Para ver los registros: `journalctl -u teti-app -f`. Después de actualizar `main.py` hay que reiniciar el servicio (`sudo systemctl restart teti-app`); los cambios en `static/` se ven con solo recargar la página.
 
+### Actualizar desde una versión sin bebés
+
+Al iniciar, el servidor migra la base de forma automática: todas las tomas existentes pasan a un bebé llamado "Mi bebé" y se imprime su código en el registro (`journalctl -u teti-app`). Para ver los códigos en cualquier momento: `./venv/bin/python db.py`. Hacé una copia de `data/teti.db` antes de actualizar.
+
+## Pruebas
+
+```bash
+./venv/bin/pip install -r requirements-dev.txt
+./venv/bin/pytest
+```
+
+Verifican que un bebé no pueda leer, editar, borrar ni importar tomas de otro, y que la migración desde la base anterior conserve los datos.
+
 ## Personalización
 
 - **Umbral de la próxima toma y alerta:** constante `ALERT_MIN` en `static/app.js` (180 minutos por defecto).
@@ -90,9 +107,14 @@ Para ver los registros: `journalctl -u teti-app -f`. Después de actualizar `mai
 
 ## API
 
+Todas las rutas de tomas y del bebé exigen la cabecera `X-Baby-Code` con el código del bebé; sin ella, o con un código inválido, responden `401` (y `429` tras demasiados intentos fallidos). El servidor solo opera sobre las tomas de ese bebé.
+
 | Método | Ruta | Descripción |
 |---|---|---|
-| `GET` | `/api/feedings` | Lista todas las tomas |
+| `POST` | `/api/babies` | Crea un bebé (`{"name": "..."}`) y devuelve su código |
+| `GET` | `/api/baby` | Datos del bebé (sirve para validar un código) |
+| `PUT` | `/api/baby` | Cambia el nombre del bebé |
+| `GET` | `/api/feedings` | Lista las tomas del bebé |
 | `POST` | `/api/feedings` | Crea una toma |
 | `PUT` | `/api/feedings/{id}` | Actualiza una toma |
 | `DELETE` | `/api/feedings/{id}` | Borra una toma |
@@ -119,7 +141,8 @@ Cada toma tiene esta forma:
 
 ## Seguridad y respaldo
 
-- La app **no tiene usuarios ni contraseña**. Está pensada para una red doméstica de confianza o una VPN privada (como Tailscale). **No la expongas directamente a internet.**
+- No hay cuentas de usuario: cada bebé se protege con un código secreto de 8 caracteres (los códigos de 16 emitidos antes siguen valiendo), y el servidor solo entrega las tomas del bebé cuyo código recibe. Quien tenga el código ve esos datos, así que compartilo con cuidado.
+- Tras 10 intentos fallidos con un código inválido en 10 minutos, el servidor bloquea esa IP temporalmente (respuesta `429`); detrás de un proxy o túnel, definí `TETI_TRUST_PROXY=1` para que cuente por IP real. Cualquiera que conozca la dirección del servidor puede crear un bebé nuevo. Si lo publicás en internet, usá siempre **HTTPS** y no difundas la dirección.
 - Para respaldar los datos, copiá `data/teti.db` o usá *Descargar copia* dentro de la app.
 
 ## Limitaciones y próximos pasos

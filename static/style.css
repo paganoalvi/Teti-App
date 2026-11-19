@@ -22,7 +22,7 @@ main{max-width:640px;margin:0 auto;padding:1rem}
 .head{display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.4rem}
 .head h2{margin:0}
 label{display:block;font-weight:700;font-size:.9rem;margin-bottom:.8rem}
-input[type=date],input[type=time],input[type=number]{
+input[type=date],input[type=time],input[type=number],input[type=text]{
   display:block;width:100%;margin-top:.25rem;padding:.65rem .75rem;font:inherit;color:var(--ink);
   background:#fff;border:2px solid var(--line);border-radius:12px}
 input:focus-visible,button:focus-visible,.btn:focus-within{outline:3px solid var(--blue);outline-offset:2px}
@@ -104,3 +104,15 @@ dialog::backdrop{background:rgba(74,68,82,.35)}
 
 .dayrow{margin:.3rem 0 .6rem}
 .dayrow input{flex:1;min-width:0}
+
+.babyname{text-align:center;font-size:.85rem;font-weight:700;color:var(--muted);margin:-.4rem 0 .5rem}
+#welcome .btn{width:100%}
+
+.ibtn.r2{right:3.9rem}
+.ibtn svg{display:block}
+.dlg .actions .btn{flex:1 1 100%}
+
+.alias{display:flex;gap:.5rem;align-items:stretch}
+.alias code{flex:1}
+.copyic{flex:none;width:3rem;border:2px solid var(--line);border-radius:12px;background:#fff;color:var(--blue-ink);cursor:pointer;display:grid;place-items:center;padding:0}
+.copyic svg{display:block}

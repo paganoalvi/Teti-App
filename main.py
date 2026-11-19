@@ -1,37 +1,15 @@
-import json
 import os
-import sqlite3
-from contextlib import contextmanager
 from typing import Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-DB = os.environ.get("TETI_DB", os.path.join(BASE, "data", "teti.db"))
-os.makedirs(os.path.dirname(DB), exist_ok=True)
+import db
+import ratelimit
+
+db.init_db()
 TIME = r"^([01]\d|2[0-3]):[0-5]\d$"
-
-
-@contextmanager
-def db():
-    con = sqlite3.connect(DB)
-    con.row_factory = sqlite3.Row
-    try:
-        yield con
-        con.commit()
-    finally:
-        con.close()
-
-
-with db() as c:
-    c.execute("PRAGMA journal_mode=WAL")
-    c.execute("""CREATE TABLE IF NOT EXISTS feedings (
-        id TEXT PRIMARY KEY, date TEXT NOT NULL, type TEXT NOT NULL,
-        start TEXT NOT NULL, end TEXT, ml INTEGER)""")
-    if "laps" not in [r[1] for r in c.execute("PRAGMA table_info(feedings)")]:
-        c.execute("ALTER TABLE feedings ADD COLUMN laps TEXT")
 
 
 class Feeding(BaseModel):
@@ -59,67 +37,82 @@ class Feeding(BaseModel):
         return self
 
 
-COLS = "id, date, type, start, end, ml, laps"
-VALS = "(:id, :date, :type, :start, :end, :ml, :laps)"
-
-def row(f):
-    d = f.model_dump()
-    d["laps"] = json.dumps(d["laps"]) if d["laps"] else None
-    return d
+class NewBaby(BaseModel):
+    name: str = Field(default="", max_length=60)
 
 
-def out(r):
-    d = dict(r)
-    d["laps"] = json.loads(d["laps"]) if d["laps"] else None
-    return d
+def client_ip(request: Request):
+    # Detrás de un proxy/túnel todos llegan con la misma IP: con TETI_TRUST_PROXY=1 se usa X-Forwarded-For.
+    if os.environ.get("TETI_TRUST_PROXY") == "1":
+        fwd = request.headers.get("x-forwarded-for", "")
+        if fwd:
+            return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
+def current_baby(request: Request, x_baby_code: str = Header(default="")):
+    """Identifica al bebé por el código que manda el dispositivo (cabecera X-Baby-Code)."""
+    ip = client_ip(request)
+    if ratelimit.blocked(ip):
+        raise HTTPException(429, "Demasiados intentos. Esperá unos minutos.")
+    baby = db.find_baby(x_baby_code)
+    if baby is None:
+        ratelimit.fail(ip)
+        raise HTTPException(401, "Código de bebé inválido")
+    return baby
 
 
 app = FastAPI(title="Teti App")
 
 
+@app.post("/api/babies", status_code=201)
+def create_baby(b: NewBaby):
+    baby = db.create_baby(b.name)
+    return {"name": baby["name"], "code": baby["code"]}
+
+
+@app.get("/api/baby")
+def get_baby(baby=Depends(current_baby)):
+    return {"name": baby["name"], "code": baby["code"]}
+
+
+@app.put("/api/baby")
+def rename_baby(b: NewBaby, baby=Depends(current_baby)):
+    db.rename_baby(baby["id"], b.name)
+    return {"name": b.name.strip()[:60] or baby["name"], "code": baby["code"]}
+
+
 @app.get("/api/feedings")
-def list_feedings():
-    with db() as c:
-        return [out(r) for r in c.execute(
-            f"SELECT {COLS} FROM feedings ORDER BY date DESC, start DESC")]
+def list_feedings(baby=Depends(current_baby)):
+    return db.list_feedings(baby["id"])
 
 
 @app.post("/api/feedings", status_code=201)
-def create(f: Feeding):
-    with db() as c:
-        try:
-            c.execute(f"INSERT INTO feedings ({COLS}) VALUES {VALS}", row(f))
-        except sqlite3.IntegrityError:
-            raise HTTPException(409, "Ya existe una toma con ese id")
+def create(f: Feeding, baby=Depends(current_baby)):
+    if not db.add_feeding(baby["id"], f.model_dump()):
+        raise HTTPException(409, "Ya existe una toma con ese id")
     return f
 
 
 @app.post("/api/feedings/bulk")
-def bulk(rows: list[Feeding]):
-    # Importar / migrar: ignora los ids que ya existen
-    with db() as c:
-        c.executemany(f"INSERT OR IGNORE INTO feedings ({COLS}) VALUES {VALS}",
-                      [row(r) for r in rows])
+def bulk(rows: list[Feeding], baby=Depends(current_baby)):
+    db.add_many(baby["id"], [r.model_dump() for r in rows])
     return {"received": len(rows)}
 
 
 @app.put("/api/feedings/{fid}")
-def update(fid: str, f: Feeding):
+def update(fid: str, f: Feeding, baby=Depends(current_baby)):
     if f.id != fid:
         raise HTTPException(400, "El id no coincide")
-    with db() as c:
-        cur = c.execute("UPDATE feedings SET date=:date, type=:type, start=:start, "
-                        "end=:end, ml=:ml, laps=:laps WHERE id=:id", row(f))
-        if cur.rowcount == 0:
-            raise HTTPException(404, "Toma no encontrada")
+    if not db.update_feeding(baby["id"], f.model_dump()):
+        raise HTTPException(404, "Toma no encontrada")
     return f
 
 
 @app.delete("/api/feedings/{fid}", status_code=204)
-def delete(fid: str):
-    with db() as c:
-        c.execute("DELETE FROM feedings WHERE id=?", (fid,))
+def delete(fid: str, baby=Depends(current_baby)):
+    db.delete_feeding(baby["id"], fid)
     return Response(status_code=204)
 
 
-app.mount("/", StaticFiles(directory=os.path.join(BASE, "static"), html=True), name="static")
+app.mount("/", StaticFiles(directory=os.path.join(db.BASE, "static"), html=True), name="static")

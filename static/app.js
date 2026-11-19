@@ -1,5 +1,4 @@
 (() => {
-const KEY = 'teti-app-v1';
 const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, '0');
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
@@ -15,18 +14,27 @@ const say = t => { $('msg').textContent = t; setTimeout(() => $('msg').textConte
 
 let data = [], editId = null;
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const BK = 'teti-baby-v1';   // bebé de este dispositivo: { name, code }
+let baby = null;
+try { baby = JSON.parse(localStorage.getItem(BK)); } catch {}
+const setBaby = b => { baby = b; try { b ? localStorage.setItem(BK, JSON.stringify(b)) : localStorage.removeItem(BK); } catch {} };
 const api = async (path, method = 'GET', body) => {
-  const r = await fetch('api/' + path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const headers = { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(baby ? { 'X-Baby-Code': baby.code } : {}) };
+  const r = await fetch('api/' + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   if (!r.ok) throw new Error(r.status);
   return r.status === 204 ? null : r.json();
 };
 async function load() {
+  if (!baby) return;
   try { data = await api('feedings'); $('offline').hidden = true; }
-  catch { $('offline').hidden = false; }
+  catch (e) {
+    if (e.message === '401') { leaveBaby('El código de este bebé ya no es válido.'); return; }
+    $('offline').hidden = false;
+  }
   renderHero();
 }
 async function refresh() {
-  if (document.hidden) return;
+  if (document.hidden || !baby) return;
   await load();
   if ($('stats').classList.contains('active') && !$('fullDlg').open) renderStats();
 }
@@ -278,8 +286,55 @@ document.addEventListener('visibilitychange', () => { swRender(); renderHero(); 
 /* Diálogos de ayuda e información */
 $('helpBtn').onclick = () => $('helpDlg').showModal();
 $('infoBtn').onclick = () => $('infoDlg').showModal();
+$('settingsBtn').onclick = () => $('settingsDlg').showModal();
 document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('dialog').close());
-[$('helpDlg'), $('infoDlg')].forEach(d => d.addEventListener('click', e => { if (e.target === d) d.close(); }));
+[$('helpDlg'), $('infoDlg'), $('settingsDlg')].forEach(d => d.addEventListener('click', e => { if (e.target === d) d.close(); }));
+
+/* Bebé: crear, unirse con código, compartir, renombrar y salir */
+const wmsg = t => { $('welcomeMsg').textContent = t; };
+function showWelcome(msg = '') {
+  $('welcome').hidden = false; $('appMain').hidden = true; $('tabs').hidden = true; $('babyName').hidden = true; $('settingsBtn').hidden = true;
+  wmsg(msg);
+}
+function showBaby() {
+  $('babyName').textContent = $('settingsName').textContent = baby.name; $('babyName').hidden = false;
+  $('babyCode').textContent = baby.code; $('settingsBtn').hidden = false;
+}
+function enter(b) {
+  setBaby({ name: b.name, code: b.code }); data = [];
+  $('welcome').hidden = true; $('appMain').hidden = false; $('tabs').hidden = false; showBaby();
+  document.querySelector('.tab[data-tab=entry]').click();
+  resetForm(); load().then(renderStats);
+}
+function leaveBaby(msg = '') { if ($('settingsDlg').open) $('settingsDlg').close(); setBaby(null); data = []; sw = blank(); swSave(); swRender(); showWelcome(msg); }
+$('createBtn').onclick = async () => {
+  try { enter(await api('babies', 'POST', { name: $('newName').value.trim() })); }
+  catch { wmsg('No se pudo crear el bebé. Revisá la conexión.'); }
+};
+$('joinBtn').onclick = async () => {
+  const code = $('joinCode').value.trim();
+  if (!code) { wmsg('Escribí el código.'); return; }
+  const prev = baby; baby = { code };
+  try { enter(await api('baby')); }
+  catch (e) { baby = prev; wmsg(e.message === '401' ? 'Ese código no existe. Revisalo e intentá de nuevo.' : 'No se pudo conectar con el servidor.'); }
+};
+$('renameBtn').onclick = async () => {
+  const n = (prompt('Nombre del bebé', baby.name) || '').trim();
+  if (!n) return;
+  try { const b = await api('baby', 'PUT', { name: n }); setBaby({ name: b.name, code: b.code }); showBaby(); }
+  catch { alert('No se pudo cambiar el nombre. Revisá la conexión.'); }
+};
+$('leaveBtn').onclick = () => { if (confirm('Vas a cerrar sesión en este celular. Para volver a entrar vas a necesitar su código. ¿Seguro?')) leaveBaby(); };
+function copyText(t) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(t);
+  const a = document.createElement('textarea'); a.value = t; a.style.cssText = 'position:fixed;opacity:0';
+  document.body.appendChild(a); a.select(); try { document.execCommand('copy'); } catch {} a.remove(); return Promise.resolve();
+}
+$('copyLink').onclick = async e => {
+  const b = e.currentTarget;
+  await copyText(`${location.origin}${location.pathname}#codigo=${baby.code}`);
+  b.textContent = '¡Link copiado!'; setTimeout(() => b.textContent = 'Copiar link de invitación', 2000);
+};
 
 /* Backup */
 $('exportBtn').onclick = () => {
@@ -299,15 +354,9 @@ $('importFile').onchange = async e => {
 
 $('statDate').value = todayStr();
 resetForm(); swRender();
-(async () => {
-  await load();
-  // Migra las tomas que se hayan guardado antes en este navegador
-  try {
-    const old = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if (Array.isArray(old) && old.length) { await api('feedings/bulk', 'POST', old); localStorage.removeItem(KEY); await load(); }
-  } catch {}
-  renderStats();
-})();
+const hashCode = (location.hash.match(/codigo=([\w-]+)/i) || [])[1];
+if (hashCode) { $('joinCode').value = hashCode; history.replaceState(null, '', location.pathname + location.search); }
+if (baby) enter(baby); else showWelcome(hashCode ? 'Tenés una invitación: tocá “Unirme” para entrar.' : '');
 setInterval(refresh, 10000);
 document.addEventListener('visibilitychange', refresh);
 })();
